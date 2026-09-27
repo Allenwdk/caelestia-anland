@@ -8,6 +8,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/privileges.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/packages.sh"
 
 if [[ "$BASE_DISTRO" == "arch" ]]; then
+    if caelestia_is_anland; then
+        # No AUR helper ships in the container and the AUR packages it needs are
+        # built through the makepkg fallback in lib/anland.sh. Installing yay
+        # here would mean an interactive makepkg -si, which cannot answer a
+        # sudo prompt from a script.
+        skip "Anland container detected - AUR packages use the makepkg fallback, yay is not needed."
+    else
     ensure_yay() {
         if command -v yay >/dev/null 2>&1; then
             ok "yay is already installed."
@@ -51,6 +58,7 @@ if [[ "$BASE_DISTRO" == "arch" ]]; then
     info "Configuring yay sudo looping and disabling interactive menus..."
     yay -Y --sudoloop --nocleanmenu --nodiffmenu --save 2>/dev/null || true
     ok "yay configured."
+    fi # anland guard
 
 elif [[ "$BASE_DISTRO" == "fedora" ]]; then
     info "Checking for Fedora prerequisites (dnf, yq, createrepo_c, jq)..."

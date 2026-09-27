@@ -5,6 +5,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/install-kind.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/log.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/privileges.sh"
+# shellcheck source=scripts/lib/packages.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/packages.sh"
 
 echo
 echo ""
@@ -38,6 +40,13 @@ else
     echo "  Existing virtual desktop configuration found - leaving it untouched."
 fi
 
+if caelestia_is_anland; then
+    # The container has no udev and no kernel input devices at all: input arrives
+    # through the anland protocol, so there is nothing for udev rules, the input
+    # group or ydotool/uinput to act on. The Android-side keyboard is the on-screen
+    # keyboard here.
+    skip "Anland container detected - udev/uinput and ydotool setup does not apply."
+else
 system_setup_needed() {
     install_is_packaged && return 1
     systemctl is-enabled --quiet keyd.service 2>/dev/null && return 0
@@ -138,5 +147,6 @@ else
     info "ydotoold starts on next login (input group takes effect then)."
 fi
 ok "ydotoold service configured."
+fi # anland guard
 
 ok "Services configured."

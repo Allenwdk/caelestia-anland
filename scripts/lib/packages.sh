@@ -9,6 +9,8 @@ CAELESTIA_PACKAGES_SOURCED=1
 
 # CAELESTIA_OS_RELEASE lets a test point the probe at a fixture rather than assert
 # against whatever the machine it runs on happens to be.
+# shellcheck source=scripts/lib/anland.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/anland.sh"
 detect_base_distro() {
     local detected="unknown"
     local os_release="${CAELESTIA_OS_RELEASE:-/etc/os-release}"
@@ -104,7 +106,8 @@ package_install() {
     case "$BASE_DISTRO" in
         arch)
             yay -S --needed "${confirm[@]}" "$pkg" 2>/dev/null ||
-                caelestia_sudo pacman -S --needed "${confirm[@]}" "$pkg" 2>/dev/null
+                caelestia_sudo pacman -S --needed "${confirm[@]}" "$pkg" 2>/dev/null ||
+                caelestia_aur_makepkg_install "$pkg"
             ;;
         fedora)
             caelestia_sudo dnf install -y "$pkg" 2>/dev/null

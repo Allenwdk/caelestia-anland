@@ -3,6 +3,8 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/log.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/privileges.sh"
+# shellcheck source=scripts/lib/packages.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/packages.sh"
 
 echo
 echo ""
@@ -110,6 +112,17 @@ tweak_no_splash_screen() {
     kwriteconfig6 --file ksplashrc --group KSplash --key Engine "none" 2>/dev/null || true
 
     ok "Plasma splash screen disabled."
+}
+
+tweak_compositing() {
+    # Some anland images ship Compositing Enabled=false. The anland backend only
+    # composites through OpenGL anyway, and effects (workspace-tracker, blur,
+    # magiclamp) refuse to load when the key says compositing is off.
+    info "Ensuring KWin compositing is enabled..."
+
+    kwriteconfig6 --file kwinrc --group Compositing --key Enabled "true" 2>/dev/null || true
+
+    ok "KWin compositing enabled."
 }
 
 tweak_reload_kde() {
@@ -221,6 +234,9 @@ tweak_disable_kde_osd
 tweak_five_desktops
 tweak_remove_panels
 tweak_no_splash_screen
+if caelestia_is_anland; then
+    tweak_compositing
+fi
 tweak_default_shell
 tweak_default_scheme
 tweak_user_avatar_symlinks

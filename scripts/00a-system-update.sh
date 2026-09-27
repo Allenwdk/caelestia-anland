@@ -7,6 +7,19 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/privileges.sh"
 # shellcheck source=scripts/lib/packages.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/packages.sh"
 
+# Anland runs a patched distro kwin that carries the anland display backend, and
+# the container's mesa is pinned by the image for the kgsl driver. A repository
+# upgrade would replace either with a build that cannot drive the display. Pin
+# them before anything can touch the repos, and skip the full upgrade by default
+# (SKIP_SYSTEM_UPDATE=false overrides).
+if caelestia_is_anland; then
+    caelestia_ensure_ignorepkg kwin xorg-xwayland mesa
+    if [[ "${SKIP_SYSTEM_UPDATE:-true}" != "false" ]]; then
+        info "Anland container: skipping the full system update (SKIP_SYSTEM_UPDATE=false to run it anyway)."
+        exit 0
+    fi
+fi
+
 kwin_session_identity() {
     local pid
     pid="$(pgrep -x kwin_wayland 2>/dev/null | head -n1 || true)"

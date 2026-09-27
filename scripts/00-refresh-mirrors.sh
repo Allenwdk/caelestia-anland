@@ -21,7 +21,12 @@ is_cachyos() {
 
 case "$BASE_DISTRO" in
     arch)
-        if [[ -f /etc/pacman.conf ]]; then
+        if caelestia_is_anland; then
+            # The container talks to the Arch Linux ARM mirrors its image was
+            # built with. reflector would rewrite the list with archlinux.org
+            # URLs, which serve x86_64 packages an aarch64 container cannot use.
+            info "Anland container detected - keeping the configured Arch Linux ARM mirrors."
+        elif [[ -f /etc/pacman.conf ]]; then
             if grep -q '^#\?ParallelDownloads' /etc/pacman.conf; then
                 caelestia_sudo sed -i 's/^#\?ParallelDownloads.*/ParallelDownloads = 5/' /etc/pacman.conf
             else
@@ -29,7 +34,7 @@ case "$BASE_DISTRO" in
             fi
         fi
 
-        if is_cachyos; then
+        if is_cachyos && ! caelestia_is_anland; then
             if command -v cachyos-rate-mirrors >/dev/null 2>&1; then
                 info "Ranking CachyOS mirrors..."
                 caelestia_sudo cachyos-rate-mirrors >/dev/null 2>&1 || \
@@ -38,14 +43,16 @@ case "$BASE_DISTRO" in
                 warn "cachyos-rate-mirrors is not installed; continuing with current mirrors."
             fi
         else
-            if ! command -v reflector >/dev/null 2>&1; then
-                caelestia_sudo pacman -Sy --noconfirm reflector >/dev/null 2>&1 || true
-            fi
-            if command -v reflector >/dev/null 2>&1; then
-                info "Ranking Arch mirrors by download speed..."
-                caelestia_sudo reflector --latest 20 --protocol https --sort rate \
-                    --save /etc/pacman.d/mirrorlist >/dev/null 2>&1 || \
-                    warn "reflector failed, continuing with current mirrors."
+            if ! caelestia_is_anland; then
+                if ! command -v reflector >/dev/null 2>&1; then
+                    caelestia_sudo pacman -Sy --noconfirm reflector >/dev/null 2>&1 || true
+                fi
+                if command -v reflector >/dev/null 2>&1; then
+                    info "Ranking Arch mirrors by download speed..."
+                    caelestia_sudo reflector --latest 20 --protocol https --sort rate \
+                        --save /etc/pacman.d/mirrorlist >/dev/null 2>&1 || \
+                        warn "reflector failed, continuing with current mirrors."
+                fi
             fi
         fi
 

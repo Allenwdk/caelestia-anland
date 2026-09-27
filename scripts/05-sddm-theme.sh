@@ -16,6 +16,13 @@ if [[ "${INSTALL_SDDM:-true}" != "true" ]]; then
     exit 0
 fi
 
+# The anland container starts the Plasma session itself through the anland app;
+# there is no display manager to theme, and its sudoers drop-in would be dead.
+if caelestia_is_anland; then
+    skip "SDDM is not used inside the anland container; skipping the login theme."
+    exit 0
+fi
+
 echo
 echo ""
 info "Installing Caelestia SDDM theme"

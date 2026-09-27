@@ -165,16 +165,76 @@ build_from_source() {
 
 mapfile -t MISSING_PKGS < <(filter_missing "${PACKAGES[@]}")
 
-if (( ${#MISSING_PKGS[@]} > 0 )); then
-    if ! yay -S --needed --noconfirm "${MISSING_PKGS[@]}"; then
+if caelestia_is_anland; then
+    info "Anland container detected - applying the container package profile."
+    # Hardware that does not exist inside the container: no network devices of
+    # its own (Android shares its connection), no backlight, no external
+    # monitors with DDC, and a GPU path gpu-screen-recorder cannot record.
+    local_pkgs=()
+    for pkg in "${PACKAGES[@]}"; do
+        case "$pkg" in
+            networkmanager|brightnessctl|power-profiles-daemon|ddcutil|gpu-screen-recorder) ;;
+            *) local_pkgs+=("$pkg") ;;
+        esac
+    done
+    PACKAGES=("${local_pkgs[@]}")
+    # darkly-bin ships an x86_64-only prebuilt; the AUR source package builds anywhere.
+    for i in "${!PACKAGES[@]}"; do
+        [[ "${PACKAGES[$i]}" == "darkly-bin" ]] && PACKAGES[$i]=darkly
+    done
+    # Tiling that the Nexus window controls drive; installed through the AUR fallback.
+    PACKAGES+=(kwin-scripts-krohnkite)
+    mapfile -t MISSING_PKGS < <(filter_missing "${PACKAGES[@]}")
+fi
+
+# Split what is missing into packages the sync repos can satisfy and the rest, so
+# a machine with no AUR helper (an anland container ships none) still batch-
+# installs everything the repos carry before the per-package fallbacks run.
+# pacman -T prints exactly the names it cannot resolve; rc 127 mirrors that.
+declare -A _unresolved=()
+mapfile -t _UNRESOLVED_PKGS < <(pacman -T "${MISSING_PKGS[@]}" 2>/dev/null || true)
+for pkg in "${_UNRESOLVED_PKGS[@]}"; do _unresolved["$pkg"]=1; done
+REPO_PKGS=()
+AUR_PKGS=()
+for pkg in "${MISSING_PKGS[@]}"; do
+    if [[ -n "${_unresolved[$pkg]:-}" ]]; then
+        AUR_PKGS+=("$pkg")
+    else
+        REPO_PKGS+=("$pkg")
+    fi
+done
+unset _unresolved _UNRESOLVED_PKGS
+
+if (( ${#REPO_PKGS[@]} > 0 )); then
+    if ! yay -S --needed --noconfirm "${REPO_PKGS[@]}"; then
         info "Batch install had failures. Retrying individually..."
-        for pkg in "${MISSING_PKGS[@]}"; do
+        for pkg in "${REPO_PKGS[@]}"; do
             if package_present "$pkg"; then
                 continue
             fi
             if ! yay -S --needed --noconfirm "$pkg"; then
-                info "yay failed to install $pkg. Attempting manual build from AUR..."
-                _built=no
+                info "yay failed to install $pkg. Trying pacman..."
+                if ! caelestia_sudo pacman -S --needed --noconfirm "$pkg"; then
+                    err "Could not install $pkg from the repositories."
+                    FAILED_PKGS+=("$pkg")
+                fi
+            fi
+        done
+    fi
+fi
+
+if (( ${#AUR_PKGS[@]} > 0 )); then
+    info "Installing AUR packages: ${AUR_PKGS[*]}"
+    for pkg in "${AUR_PKGS[@]}"; do
+        if package_present "$pkg"; then
+            continue
+        fi
+        if ! yay -S --needed --noconfirm "$pkg"; then
+            info "yay is not available or failed for $pkg. Attempting manual build from AUR..."
+            _built=no
+            if caelestia_aur_makepkg_install "$pkg"; then
+                _built=yes
+            else
                 tmpdir="$(mktemp -d)"
                 if git clone --depth 1 "https://aur.archlinux.org/${pkg}.git" "$tmpdir"; then
                     (
@@ -187,26 +247,33 @@ if (( ${#MISSING_PKGS[@]} > 0 )); then
                     err "Could not fetch AUR repository for $pkg."
                 fi
                 rm -rf "$tmpdir"
+            fi
 
-                if [[ "$_built" != "yes" ]]; then
-                    repo="$(source_repo_for "$pkg")"
-                    if [[ -n "$repo" ]]; then
-                        info "Compiling $pkg from source ($repo)..."
-                        if build_from_source "$pkg" "$repo"; then
-                            info "Built $pkg from source."
-                        else
-                            FAILED_PKGS+=("$pkg")
-                        fi
+            if [[ "$_built" != "yes" ]]; then
+                repo="$(source_repo_for "$pkg")"
+                if [[ -n "$repo" ]]; then
+                    info "Compiling $pkg from source ($repo)..."
+                    if build_from_source "$pkg" "$repo"; then
+                        info "Built $pkg from source."
                     else
-                        err "No source repository mapping for $pkg."
                         FAILED_PKGS+=("$pkg")
                     fi
+                else
+                    err "No source repository mapping for $pkg."
+                    FAILED_PKGS+=("$pkg")
                 fi
             fi
-        done
-    fi
-else
+        fi
+    done
+fi
+
+if (( ${#MISSING_PKGS[@]} == 0 )); then
     info "All requested packages for group $PACKAGE_GROUP are already installed."
+fi
+
+if caelestia_is_anland && package_present kwin-scripts-krohnkite; then
+    info "Enabling the Krohnkite KWin script..."
+    kwriteconfig6 --file kwinrc --group Plugins --key krohnkiteEnabled true
 fi
 
 if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "themes" ]]; then

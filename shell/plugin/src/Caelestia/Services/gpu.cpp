@@ -55,6 +55,14 @@ bool hasIntelGpu() {
     return false;
 }
 
+// Qualcomm Adreno through the kgsl sysfs class: containers that expose only a
+// render node have no DRM card dir at all, so kgsl is the only place usage can
+// come from there (anland/droidspaces is exactly that case)
+bool hasKgslGpu() {
+    return QFile::exists(QStringLiteral("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage"))
+        || QFile::exists(QStringLiteral("/sys/class/kgsl/kgsl-3d0/gpubusy"));
+}
+
 QString cleanName(QString s) {
     static const QRegularExpression noise(
         QStringLiteral("\\(R\\)|\\(TM\\)|Graphics"), QRegularExpression::CaseInsensitiveOption);
@@ -272,7 +280,9 @@ void Gpu::finishNameSource(int index, QString name) {
     // the user pins a type) so a later switch to Auto reads a correct value without
     // depending on its own re-probe, which is skipped while a probe is in flight.
     if (index == kNvidiaSource) {
-        setAutoType(!name.isEmpty() ? Nvidia : (m_busyFiles.isEmpty() && !hasIntelGpu() ? None : Generic));
+        setAutoType(!name.isEmpty()
+                ? Nvidia
+                : (m_busyFiles.isEmpty() && !hasIntelGpu() && !hasKgslGpu() ? None : Generic));
     }
 
     if (!name.isEmpty()) {
@@ -284,6 +294,13 @@ void Gpu::finishNameSource(int index, QString name) {
     if (index + 1 < static_cast<int>(nameSources().size())) {
         tryNameSource(index + 1);
     } else {
+        // glxinfo and lspci have nothing to say about an Adreno inside a
+        // container; the kgsl model node does
+        QFile model(QStringLiteral("/sys/class/kgsl/kgsl-3d0/gpu_model"));
+        if (model.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            setName(cleanName(QString::fromUtf8(model.readAll().trimmed())));
+            model.close();
+        }
         m_detecting = false;
     }
 }
@@ -368,6 +385,36 @@ void Gpu::readGenericUsage() {
         }
     }
 
+    // Pass 3: kgsl (Adreno). gpu_busy_percentage is a plain "N %"; the gpubusy
+    // pair is busy/total ticks over the window since the last read.
+    QFile kgslBusy(QStringLiteral("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage"));
+    if (!kgslBusy.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        kgslBusy.setFileName(QStringLiteral("/sys/class/kgsl/kgsl-3d0/gpubusy"));
+        kgslBusy.open(QIODevice::ReadOnly | QIODevice::Text);
+    }
+    if (kgslBusy.isOpen()) {
+        const bool isPair = kgslBusy.fileName().endsWith(QStringLiteral("gpubusy"));
+        const QList<QByteArray> parts = kgslBusy.readAll().simplified().split(' ');
+        kgslBusy.close();
+
+        bool ok = false;
+        qreal v = 0.0;
+        if (isPair && parts.size() >= 2) {
+            const qreal busy = parts.at(0).toDouble(&ok);
+            const qreal total = parts.at(1).toDouble();
+            if (ok && total > 0.0) {
+                v = busy / total * 100.0;
+            } else {
+                ok = false;
+            }
+        } else {
+            v = QString::fromUtf8(parts.join(' ')).remove(u'%').trimmed().toDouble(&ok);
+        }
+        if (ok && v > maxPerc) {
+            maxPerc = v;
+        }
+    }
+
     const qreal newPerc = maxPerc >= 0.0 ? maxPerc / 100.0 : 0.0;
     if (std::abs(newPerc - m_percentage) > 0.0001) {
         m_percentage = newPerc;
@@ -406,6 +453,23 @@ void Gpu::startNvidiaUsage() {
 }
 
 void Gpu::readGpuTemperature() {
+    // kgsl reports millidegrees in a single node; lm_sensors sees nothing
+    // without a PCI GPU, so try it first
+    QFile kgslTemp(QStringLiteral("/sys/class/kgsl/kgsl-3d0/temp"));
+    if (kgslTemp.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        bool ok = false;
+        const qreal milli = kgslTemp.readAll().trimmed().toDouble(&ok);
+        kgslTemp.close();
+        if (ok) {
+            const qreal newTemp = milli / 1000.0;
+            if (std::abs(newTemp - m_temperature) > 0.05) {
+                m_temperature = newTemp;
+                Q_EMIT temperatureChanged();
+            }
+            return;
+        }
+    }
+
     const auto t = sensorslib::gpuPciAverageTemp();
     const qreal newTemp = t.value_or(0.0);
     if (std::abs(newTemp - m_temperature) > 0.05) {
