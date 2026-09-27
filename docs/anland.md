@@ -54,12 +54,15 @@ Steps that change:
 
 ## KWin effect plugins
 
-Some anland images ship a `kwin` package built without the stock effect
-plugins (`/usr/lib/qt6/plugins/kwin/effects/plugins/` is empty). The Caelestia
-workspace-tracker effect installs independently and works either way; the
-stock effects (blur, magiclamp, overview, ...) come back by rebuilding the
-kwin package with anland's own `producers/kde/Arch_v5/build.sh` (the PKGBUILD
-builds them) and reinstalling it:
+KWin 6.7 compiles the stock effect implementations (blur, magiclamp,
+overview, ...) **statically into the `kwin_wayland` binary**; only the KCM
+config dialogs live in `/usr/lib/qt6/plugins/kwin/effects/configs/`. An empty
+`effects/plugins/` directory is therefore not a missing feature — the stock
+effects load and toggle through the usual `kwinrc [Plugins]` keys. External
+effect plugins (Caelestia's workspace-tracker) still build against the
+installed KWin and install into `effects/plugins/`.
+
+Rebuilding the kwin package is only needed to pick up anland backend fixes:
 
 ```sh
 cd anland/producers/kde/Arch_v5
@@ -67,8 +70,8 @@ JOBS=6 INSTALL=1 ./build.sh
 ```
 
 Afterwards verify both halves survived:
-`ls /usr/lib/qt6/plugins/kwin/effects/plugins/` and
-`strings /usr/bin/kwin_wayland | grep AnlandBackend`.
+`strings /usr/bin/kwin_wayland | grep AnlandBackend` and
+`strings /usr/bin/kwin_wayland | grep -c BlurEffect`.
 
 ## Package pinning
 
