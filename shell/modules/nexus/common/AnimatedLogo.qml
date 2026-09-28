@@ -28,9 +28,11 @@ Item {
 
     // Every animation below wakes the main thread at the display refresh rate for
     // as long as it runs, and the star twinkle never ends. The logo also lives in
-    // windows that are created at startup but stay hidden (the What's New window),
-    // so the animations are tied to the window actually being on screen.
-    readonly property bool onScreen: Window.window ? Window.window.visible : false
+    // windows that are created at startup but stay hidden (the What's New window)
+    // and in drawers that keep every page instantiated while another tab is shown,
+    // so the animations are tied to the window being on screen AND to this item
+    // actually being visible through the ancestor chain.
+    readonly property bool onScreen: Window.window ? (Window.window.visible && root.visible) : false
 
     signal animationCompleted
 
